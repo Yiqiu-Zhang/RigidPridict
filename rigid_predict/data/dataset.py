@@ -53,7 +53,7 @@ def knn_graph(x, k):
 def update_edges(rigids, seq, rigid_mask, k=60,):
 
     res_index = torch.arange(0, len(seq))
-    edge_index, distance = knn_graph(rigids.loc, k)
+    edge_index, distance = knn_graph(rigids.trans, k)
 
     distance_rbf = rbf(distance)
     rigid_res_idx = res_index.unsqueeze(-1).repeat(1, 5).reshape(-1)
@@ -95,9 +95,9 @@ def protein_to_graph(protein):
     node_feature = torch.cat((flat_rigid_type, flat_rigid_property), dim=-1).float()
     node_feature = node_feature[rigid_mask]
 
-    gt_rigids, local_r, gt_frames_to_global, init_rigid = get_gt_init_frames(angles, coords, seq, rigid_mask)
+    gt_rigids, _, gt_global_frame, init_rigid = get_gt_init_frames(angles, coords, seq, rigid_mask)
 
-    k = 32 if len(init_rigid) >= 32 else len(init_rigid)
+    k = 32 if len(node_feature) >= 32 else len(node_feature)
     distance_rbf, relative_pos, edge_index = update_edges(init_rigid, seq, rigid_mask, k)
 
     data = torch_geometric.data.Data(x = node_feature,
@@ -109,9 +109,12 @@ def protein_to_graph(protein):
                                      rigid_mask = rigid_mask,
                                      fname = fname,
                                      edge_index = edge_index,
+                                     edge_attr = relative_pos,
                                      atom_mask = mid_frame_mask,
                                      bb_mask = bb_mask,
-                                     gt_rigids = gt_rigids,
+                                     gt_rigids = gt_rigids.to_tensor_4x4(),
+                                     rigid = init_rigid.to_tensor_4x4(),
+                                     gt_global_frame = gt_global_frame.to_tensor_4x4(),
                                      )
 
     return data
@@ -140,10 +143,9 @@ def preprocess_datapoints(graph_data=None, raw_dir=None):
     return proteins
 
 class ProteinDataset(Dataset, ABC):
-    def __init__(self,data, transform = None):
+    def __init__(self,data):
 
-        super(ProteinDataset, self).__init__(transform)
-        self.transform = transform
+        super(ProteinDataset, self).__init__()
         self.proteins = data
 
     def len(self): return len(self.proteins)

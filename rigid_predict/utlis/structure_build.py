@@ -22,7 +22,6 @@ def rotate_sidechain(
         angles: torch.Tensor,  # [N,4，2]
         last_local_r: geometry.Rigid,  # [N, 8] Rigid
 ) -> geometry.Rigid:
-    last_local_r = geometry.from_tensor_4x4(last_local_r)
     sin_angles = torch.sin(angles)
     cos_angles = torch.cos(angles)
 
@@ -48,7 +47,7 @@ def rotate_sidechain(
     all_rots[..., 2, 1] = sin_angles
     all_rots[..., 2, 2] = cos_angles
 
-    all_rots = geometry.Rigid(geometry.Rotation(rot_mats=all_rots), None, None)
+    all_rots = geometry.Rigid(geometry.Rotation(rot_mats=all_rots), None)
 
     all_frames = geometry.Rigid_mult(last_local_r, all_rots)
 
@@ -75,6 +74,8 @@ def rotate_sidechain(
 
 def frame_to_14pos(frames, gt_frame, aatype_idx, bb_cords):
 
+    frames = torch.cat([gt_frame, frames], dim=-3)
+    frames = geometry.from_tensor_4x4(frames)
     # [21 , 14]
     group_index = torch.tensor(restype_atom14_to_rigid_group).to(frames.device)
 
@@ -82,7 +83,7 @@ def frame_to_14pos(frames, gt_frame, aatype_idx, bb_cords):
     group_mask = group_index[aatype_idx, ...]
     # [*, N, 14, 8]
     group_mask = nn.functional.one_hot(group_mask, num_classes=frames.shape[-1])
-    frames = torch.cat(gt_frame, frames)
+
     # [*, N, 14, 8] Rigid frames for every 14 atoms, non exist atom are mapped to group 0
     map_atoms_to_global = frames[..., None, :] * group_mask  # [*, N, :, 8] * [*, N, 14, 8]
 
@@ -225,18 +226,18 @@ def get_gt_init_frames(angles, bb_coord, aatype, rigid_mask):
 
     bb_to_gb = geometry.get_gb_trans(bb_coord)
     sc_to_bb, local_r = rotate_sidechain(aatype, angles, init_local_rigid)
-    all_frames_to_global = geometry.Rigid_mult(bb_to_gb[..., None], sc_to_bb)
+    gt_global_frame = geometry.Rigid_mult(bb_to_gb[..., None], sc_to_bb)
 
-    init_frame  = geometry.Rigid_mult(bb_to_gb[..., None], geometry.Rigid.identity(sc_to_bb.shape()))
+    init_frame  = geometry.Rigid_mult(bb_to_gb[..., None], geometry.Rigid.identity(sc_to_bb.shape, requires_grad=False))
 
     # [N_rigid] Rigid
-    flatten_frame = geometry.flatten_rigid(all_frames_to_global[..., [0, 4, 5, 6, 7]])
+    flatten_frame = geometry.flatten_rigid(gt_global_frame[..., [0, 4, 5, 6, 7]])
     init_rigid = geometry.flatten_rigid(init_frame[..., [0, 4, 5, 6, 7]])
 
     flat_rigids = flatten_frame[rigid_mask]
     init_rigid = init_rigid[rigid_mask]
 
-    return flat_rigids, local_r, all_frames_to_global, init_rigid
+    return flat_rigids, local_r, gt_global_frame, init_rigid
 
 
 def update_E_idx(frames: geometry.Rigid,  # [*, N_rigid] Rigid

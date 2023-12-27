@@ -9,7 +9,7 @@ from torch_geometric.nn.dense.linear import Linear
 from torch_geometric.utils import softmax
 
 from rigid_predict.utlis.geometry import Rigid, Rotation, \
-    from_tensor_4x4, loc_invert_rot_mul_vec, loc_rigid_mul_vec
+    from_tensor_4x4, invert_rot_mul_vec, rigid_mul_vec
 from rigid_predict.utlis.tensor_utlis import ipa_point_weights_init_
 
 
@@ -62,7 +62,7 @@ class GraphIPA(MessagePassing, ABC):
         ipa_point_weights_init_(self.head_weights)
         self.softplus = Softplus()
 
-    def forward(self, x, edge_attr, data) -> Tensor:
+    def forward(self, data, x, edge_attr) -> Tensor:
         '''
         x: node_emb [N, C_n]
         edge_index: [2, N_e]
@@ -93,7 +93,7 @@ class GraphIPA(MessagePassing, ABC):
         # [N, H * P_q, 3]
         dst_q_pts = torch.split(dst_q_pts, dst_q_pts.shape[-1] // 3, dim=-1)
         dst_q_pts = torch.stack(dst_q_pts, dim=-1)
-        dst_q_pts = loc_rigid_mul_vec(r[..., None], dst_q_pts)
+        dst_q_pts = rigid_mul_vec(r[..., None], dst_q_pts)
         # [N, H, P_q, 3]
         dst_q_pts = dst_q_pts.view(-1, self.heads, self.no_qk_points, 3)
 
@@ -102,7 +102,7 @@ class GraphIPA(MessagePassing, ABC):
         # [N, H * (P_q +P_v), 3]
         src_kv_pts = torch.split(src_kv_pts, src_kv_pts.shape[-1] // 3, dim=-1)
         src_kv_pts = torch.stack(src_kv_pts, dim=-1)
-        src_kv_pts = loc_rigid_mul_vec(r[..., None], src_kv_pts)
+        src_kv_pts = rigid_mul_vec(r[..., None], src_kv_pts)
 
         # [N, H, (P_q +P_v), 3]
         src_kv_pts = src_kv_pts.view(-1, self.heads, self.no_v_points + self.no_qk_points, 3)
@@ -182,7 +182,7 @@ class GraphIPA(MessagePassing, ABC):
         o_pair = o_pair.reshape(n_edge, -1)
         # [E, H, P_v, 3]
         o_pt = v_j * alpha[..., None, None]
-        o_pt = loc_invert_rot_mul_vec(rigid_i[..., None, None], o_pt)
+        o_pt = invert_rot_mul_vec(rigid_i[..., None, None], o_pt)
         o_pt = o_pt.reshape(n_edge, -1, 3)
 
         # [E, H * Pv * 3 + C_hidden + C_e]

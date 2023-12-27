@@ -203,10 +203,11 @@ class InputEmbedder(nn.Module):
 
         self.relpos_embedding = torch.nn.Embedding(pair_dim, c_z)
 
-        self.pair_embedder = PairEmbedder(pair_dim,
+        self.pair_embedder = PairEmbedder(c_z,
                                           c_z,)
 
-        self.linear_tf_n = nn.Linear(nf_dim, c_s)
+        self.linear_tf_0 = nn.Linear(nf_dim, c_s)
+        self.linear_tf_1 = nn.Linear(c_s, c_s)
         self.relu = nn.ReLU()
         self.linear_tf_2 = nn.Linear(c_s, c_s)
         self.ln = nn.LayerNorm(c_s)
@@ -219,11 +220,11 @@ class InputEmbedder(nn.Module):
         ems_s = data.esm_s.repeat(1, 5).reshape(-1, data.esm_s.shape[-1])
         ems_s = ems_s[data.rigid_mask]
 
-        s = ems_s + self.linear_tf_n(data.x)
+        s = ems_s + self.linear_tf_0(data.x)
         z = self.relpos_embedding(data.edge_attr)
 
         # [N_rigid, c_n]
-        s = self.linear_tf_n(s)
+        s = self.linear_tf_1(s)
         s = self.relu(s)
         s = self.linear_tf_2(s)
         s = self.ln(s)
@@ -274,19 +275,21 @@ class StructureUpdateModule(nn.Module):
     def forward(self, data, s, z):
 
         outputs = []
+        r = geometry.from_tensor_4x4(data.rigid)
+
         for i, block in enumerate(self.blocks):
-            s, z, pred_xyz, all_frames_to_global, rigids = block(data, s, z)
+            s, z, pred_xyz, r = block(data, s, z, r)
 
             preds = {
-                "frames": rigids.to_tensor_4x4(),
-                "sidechain_frames": all_frames_to_global.to_tensor_4x4(),
+                "frames": r.to_tensor_4x4(),
+                #"sidechain_frames": all_frames_to_global.to_tensor_4x4(),
                 "positions": pred_xyz,
                 "states": s,
             }
 
             outputs.append(preds)
 
-            rigids = rigids.stop_rot_gradient()
+            r = r.stop_rot_gradient()
 
         del z
 
@@ -329,38 +332,40 @@ class StructureBlock(nn.Module):
 
         self.Rigid_update = RigidUpdate(c_s)
 
-    def forward(self, data, s, z):
+    def forward(self, data, s, z, r):
 
         # [N, C_hidden]
-        s = s + self.edge_ipa(s, z, data)
+        s = s + self.edge_ipa(data, s, z)
         s = self.ipa_ln(s)
         s = self.node_transition(s)
         z = self.edge_transition(data, s, z)
 
-        rigids = data.rigids.compose_q_update_vec(self.Rigid_update(s, data.bb_mask, data.atom_mask))
+        r = r.compose_q_update_vec(self.Rigid_update(s, data.bb_mask, data.atom_mask))
 
         # change to rotation matrix
-        rigids = geometry.Rigid(
+        r = geometry.Rigid(
             geometry.Rotation(
-                rot_mats=rigids.get_rots().get_rot_mats(),
+                rot_mats=r.rot.get_rot_mat(),
                 quats=None
             ),
-            rigids.get_trans(),
+            r.trans,
         )
 
         identity = geometry.Rigid.identity((len(data.aatype),5))
         flatten_identity = geometry.flatten_rigid(identity)
-        flatten_identity[data.rigid_mask] = rigids
-        sidechain_frame = geometry.unflatten_toN4(flatten_identity)
+        t_identity = flatten_identity.to_tensor_4x4()
+        t_identity[data.rigid_mask] = r.to_tensor_4x4()
+
+        sidechain_frame_tensor = geometry.unflatten_toN4(t_identity)
 
         pred_xyz = structure_build.frame_to_14pos(
-            sidechain_frame,
-            data.gt_frame[...,:4],
+            sidechain_frame_tensor,
+            data.gt_global_frame[...,:4,:,:],
             data.aatype,
-            data.bb_cords
+            data.bb_coord
         )
 
-        return s, z, pred_xyz, rigids
+        return s, z, pred_xyz, r
 
 class RigidPacking(nn.Module):
     """
@@ -427,7 +432,7 @@ class RigidPacking(nn.Module):
         s, z = self.input_embedder(data)
 
         # [N_rigid, (c_s,c_v)]
-        outputs = self.structure_update(s, z, data)
+        outputs = self.structure_update(data, s, z)
 
         return outputs
 

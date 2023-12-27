@@ -630,7 +630,7 @@ atom_type_num = len(atom_types)  # := 37.
 restype_atom14_to_rigid_group = np.zeros([21, 14], dtype=int)
 restype_atom14_mask = np.zeros([21, 14], dtype=np.float32)
 restype_atom14_rigid_group_positions = np.zeros([21, 14, 3], dtype=np.float32)
-restype_rigid_group_default_frame = np.zeros([21, 8, 5, 5], dtype=np.float32)
+restype_rigid_group_default_frame = np.zeros([21, 8, 4, 4], dtype=np.float32)
 restype_atom37_mask = np.zeros([21, 37], dtype=np.float32)
 restype_rigid_vector = np.zeros([21, 5, 9, 3], dtype=np.float32)
 
@@ -644,10 +644,9 @@ def make_rigid_trans(ex, y_vec, t, p):
     ey_norm = ey / np.linalg.norm(ey)
 
     ez_norm = np.cross(ex_norm, ey_norm)
-    loc = t + p
-    m = np.stack([ex_norm, ey_norm, ez_norm, t, loc]).transpose()
+    m = np.stack([ex_norm, ey_norm, ez_norm, t,]).transpose()
 
-    m = np.concatenate([m, [[0.0, 0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 0.0, 1.0]]], axis=0)
+    m = np.concatenate([m, [[0.0, 0.0, 0.0, 1.0,]]], axis=0)
 
     return m
 
@@ -669,12 +668,12 @@ def _make_rigid_group_constants():
             restype_atom14_rigid_group_positions[residx, atom14idx, :] = atom_position
 
         # backbone to backbone is the identity transform
-        restype_rigid_group_default_frame[residx, 0, :, :] = np.eye(5)
+        restype_rigid_group_default_frame[residx, 0, :, :] = np.eye(4)
 
         # pre-omega-frame to backbone (currently dummy identity matrix)
-        restype_rigid_group_default_frame[residx, 1, :, :] = np.eye(5)
-        restype_rigid_group_default_frame[residx, 2, :, :] = np.eye(5)
-        restype_rigid_group_default_frame[residx, 3, :, :] = np.eye(5)
+        restype_rigid_group_default_frame[residx, 1, :, :] = np.eye(4)
+        restype_rigid_group_default_frame[residx, 2, :, :] = np.eye(4)
+        restype_rigid_group_default_frame[residx, 3, :, :] = np.eye(4)
 
         '''
         主链原子坐标暂时不由frame计算，因为这种计算方式忽略了肽键的存在，
