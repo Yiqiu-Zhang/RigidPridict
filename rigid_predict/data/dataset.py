@@ -8,8 +8,8 @@ from rigid_predict.utlis.structure_build import get_gt_init_frames
 from rigid_predict.utlis.constant import restype_frame_mask, middle_atom_mask
 from torch_geometric.data import Dataset
 
-def relpos(rigid_res_index, edge_index):
 
+def relpos(rigid_res_index, edge_index):
     d_i = rigid_res_index[edge_index[0]]
     d_j = rigid_res_index[edge_index[1]]
 
@@ -25,6 +25,7 @@ def relpos(rigid_res_index, edge_index):
 
     return d
 
+
 def rbf(D, D_min=0., D_max=20., D_count=16):
     # Distance radial basis function
 
@@ -38,20 +39,20 @@ def rbf(D, D_min=0., D_max=20., D_count=16):
 
     return RBF
 
-def knn_graph(x, k):
 
+def knn_graph(x, k):
     displacement = x[None, :, :] - x[:, None, :]
     distance = torch.linalg.vector_norm(displacement, dim=-1).float().to(x)
 
     # Value of distance [N_rigid, K], Index of distance [N_rigid, K]
     distance, E_idx = torch.topk(distance, k, dim=-1, largest=False)
-    col = E_idx.flatten() # source
-    row = torch.arange(E_idx.size(0)).view(-1,1).repeat(1,k).flatten().to(col) # target
+    col = E_idx.flatten()  # source
+    row = torch.arange(E_idx.size(0)).view(-1, 1).repeat(1, k).flatten().to(col)  # target
 
     return torch.stack([row, col], dim=0), distance.flatten()
 
-def update_edges(rigids, seq, rigid_mask, k=60,):
 
+def update_edges(rigids, seq, rigid_mask, k=60, ):
     res_index = torch.arange(0, len(seq))
     edge_index, distance = knn_graph(rigids.trans, k)
 
@@ -62,6 +63,7 @@ def update_edges(rigids, seq, rigid_mask, k=60,):
     relative_pos = relpos(rigid_res_idx, edge_index)
 
     return distance_rbf, relative_pos, edge_index
+
 
 def protein_to_graph(protein):
     angles = torch.as_tensor(protein['angles'])
@@ -83,8 +85,8 @@ def protein_to_graph(protein):
     mid_frame_mask = torch.BoolTensor(torch.flatten(mid_frame_mask, start_dim=-2))
     mid_frame_mask = mid_frame_mask[rigid_mask]
 
-    bb_mask = torch.zeros(*seq.shape,5, dtype=bool)
-    bb_mask[:,0] = True
+    bb_mask = torch.zeros(*seq.shape, 5, dtype=bool)
+    bb_mask[:, 0] = True
     bb_mask = torch.BoolTensor(torch.flatten(bb_mask, start_dim=-2))
     bb_mask = bb_mask[rigid_mask]
 
@@ -100,21 +102,21 @@ def protein_to_graph(protein):
     k = 32 if len(node_feature) >= 32 else len(node_feature)
     distance_rbf, relative_pos, edge_index = update_edges(init_rigid, seq, rigid_mask, k)
 
-    data = torch_geometric.data.Data(x = node_feature,
-                                     esm_s = esm_s,
+    data = torch_geometric.data.Data(x=node_feature,
+                                     esm_s=esm_s,
                                      true_chi=angles,
                                      aatype=seq,
                                      bb_coord=coords,
-                                     chi_mask = chi_mask,
-                                     rigid_mask = rigid_mask,
-                                     fname = fname,
-                                     edge_index = edge_index,
-                                     edge_attr = relative_pos,
-                                     atom_mask = mid_frame_mask,
-                                     bb_mask = bb_mask,
-                                     gt_rigids = gt_rigids.to_tensor_4x4(),
-                                     rigid = init_rigid.to_tensor_4x4(),
-                                     gt_global_frame = gt_global_frame.to_tensor_4x4(),
+                                     chi_mask=chi_mask,
+                                     rigid_mask=rigid_mask,
+                                     fname=fname,
+                                     edge_index=edge_index,
+                                     edge_attr=relative_pos,
+                                     atom_mask=mid_frame_mask,
+                                     bb_mask=bb_mask,
+                                     gt_rigids=gt_rigids.to_tensor_4x4(),
+                                     rigid=init_rigid.to_tensor_4x4(),
+                                     gt_global_frame=gt_global_frame.to_tensor_4x4(),
                                      )
 
     return data
@@ -142,13 +144,14 @@ def preprocess_datapoints(graph_data=None, raw_dir=None):
 
     return proteins
 
-class ProteinDataset(Dataset, ABC):
-    def __init__(self,data):
 
+class ProteinDataset(Dataset, ABC):
+    def __init__(self, data):
         super(ProteinDataset, self).__init__()
         self.proteins = data
 
     def len(self): return len(self.proteins)
+
     def get(self, item):
-        protein =  self.proteins[item]
+        protein = self.proteins[item]
         return copy.deepcopy(protein)

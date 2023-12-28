@@ -77,7 +77,7 @@ def frame_to_14pos(frames, gt_frame, aatype_idx, bb_cords):
     frames = torch.cat([gt_frame, frames], dim=-3)
     frames = geometry.from_tensor_4x4(frames)
     # [21 , 14]
-    group_index = torch.tensor(restype_atom14_to_rigid_group).to(frames.device)
+    group_index = torch.tensor(restype_atom14_to_rigid_group).to(frames.device).to(torch.int64)
 
     # [21 , 14] idx [*, N] -> [*, N, 14]
     group_mask = group_index[aatype_idx, ...]
