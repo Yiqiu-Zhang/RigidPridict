@@ -40,10 +40,9 @@ class RigidPacking_Lighting(RigidPacking, pl.LightningModule):
         """
         Training step, runs once per batch
         """
-
         outputs = self.forward(batch)
         avg_loss = losses.fape_loss(outputs, batch)
-
+        
         self.log("train_loss", avg_loss, on_epoch=True, batch_size=batch.batch_size, rank_zero_only=True)
 
         return avg_loss
@@ -70,6 +69,15 @@ class RigidPacking_Lighting(RigidPacking, pl.LightningModule):
             self.log("val_loss", avg_loss, on_epoch=True, batch_size=batch.batch_size, rank_zero_only=True)
         return avg_loss
 
+    """
+    def on_after_backward(self) -> None:
+        print("on_after_backward enter")
+        for name, param in self.named_parameters():
+            if param.grad is None:
+                print(name)
+        print("on_after_backward exit")
+    """
+    
     def configure_optimizers(self) -> Dict[str, Any]:
         """
         Return optimizer. Limited support for some optimizers

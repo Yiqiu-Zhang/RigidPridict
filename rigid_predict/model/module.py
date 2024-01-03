@@ -5,6 +5,7 @@ import glob
 from pathlib import Path
 import json
 import logging
+import time 
 
 import torch
 import torch.nn as nn
@@ -127,10 +128,10 @@ class RigidUpdate(nn.Module):
 
         # [N, 6]
         update = self.linear(s)
-        am = torch.ones(len(atom_mask), 6)
-        bm = torch.ones(len(bb_mask), 6)
-        am[atom_mask] = torch.tensor([0., 0, 0., 1., 1., 1.]) # only mask rotation
-        bm[bb_mask] = torch.tensor([0., 0., 0., 0., 0., 0.]) # mask both rotation and translation
+        am = torch.ones(len(atom_mask), 6).to(s.device)
+        bm = torch.ones(len(bb_mask), 6).to(s.device)
+        am[atom_mask] = torch.tensor([0., 0, 0., 1., 1., 1.]).to(s.device) # only mask rotation
+        bm[bb_mask] = torch.tensor([0., 0., 0., 0., 0., 0.]).to(s.device) # mask both rotation and translation
 
         update = update * am * bm
 
@@ -259,13 +260,15 @@ class StructureUpdateModule(nn.Module):
 
         self.blocks = nn.ModuleList()
         self.relu = nn.ReLU()
-        for _ in range(no_blocks):
+        for block_idx in range(no_blocks):
             block = StructureBlock(c_n,
                                    c_z,
                                    c_hidden,
                                    ipa_no_heads,
                                    no_qk_points,
                                    no_v_points,
+                                   block_idx,
+                                   no_blocks,
                                    )
 
             self.blocks.append(block)
@@ -278,13 +281,13 @@ class StructureUpdateModule(nn.Module):
         r = geometry.from_tensor_4x4(data.rigid)
 
         for i, block in enumerate(self.blocks):
-            s, z, pred_xyz, r = block(data, s, z, r)
+            s, z, pred_xyz, r = block(data, s, z, r, i)
 
             preds = {
                 "frames": r.to_tensor_4x4(),
                 #"sidechain_frames": all_frames_to_global.to_tensor_4x4(),
                 "positions": pred_xyz,
-                "states": s,
+                #"states": s,
             }
 
             outputs.append(preds)
@@ -305,8 +308,12 @@ class StructureBlock(nn.Module):
                  ipa_no_heads,
                  no_qk_points,
                  no_v_points,
+                 block_idx,
+                 no_blocks,
                  ):
         super(StructureBlock, self).__init__()
+        
+        self.no_blocks = no_blocks
         self.edge_ipa = GraphIPA(c_s,
                                  c_hidden,
                                  c_z,
@@ -326,19 +333,21 @@ class StructureBlock(nn.Module):
 
         self.node_transition = TransitionLayer(c_s)
 
-        self.edge_transition = EdgeTransition(c_s,
-                                              c_z,
-                                              c_z)
+        if block_idx < (no_blocks-1):
+            self.edge_transition = EdgeTransition(c_s,
+                                                c_z,
+                                                c_z)
 
         self.Rigid_update = RigidUpdate(c_s)
 
-    def forward(self, data, s, z, r):
+    def forward(self, data, s, z, r, i):
 
         # [N, C_hidden]
         s = s + self.edge_ipa(data, s, z)
         s = self.ipa_ln(s)
         s = self.node_transition(s)
-        z = self.edge_transition(data, s, z)
+        if i < (self.no_blocks -1):
+            z = self.edge_transition(data, s, z)
 
         r = r.compose_q_update_vec(self.Rigid_update(s, data.bb_mask, data.atom_mask))
 
@@ -351,7 +360,7 @@ class StructureBlock(nn.Module):
             r.trans,
         )
 
-        identity = geometry.Rigid.identity((len(data.aatype),5))
+        identity = geometry.Rigid.identity((len(data.aatype),5), device= r.device)
         flatten_identity = geometry.flatten_rigid(identity)
         t_identity = flatten_identity.to_tensor_4x4()
         t_identity[data.rigid_mask] = r.to_tensor_4x4()
@@ -410,6 +419,9 @@ class RigidPacking(nn.Module):
         self.all_loc = all_loc
         self.num_blocks = num_blocks
         self.top_k = top_k
+        
+        self.train_epoch_counter = 0
+        self.train_epoch_last_time = time.time()
 
         self.input_embedder = InputEmbedder(nf_dim, c_s,
                                             pair_dim, c_z, # Pair feature related dim
@@ -427,7 +439,8 @@ class RigidPacking(nn.Module):
 
     def forward(self,
                 data):
-
+        
+        torch.cuda.empty_cache()
         # [N_rigid, (c_s,c_v)], [E, (e_s,e_v)]
         s, z = self.input_embedder(data)
 

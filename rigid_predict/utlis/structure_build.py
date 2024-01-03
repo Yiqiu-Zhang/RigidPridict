@@ -8,7 +8,7 @@ from rigid_predict.utlis.constant import (restype_rigid_group_default_frame,
                                       restype_atom37_mask,
                                       make_atom14_37_list,
                                       )
-
+from rigid_predict.utlis import constant as constant
 import rigid_predict.utlis.constant as rc
 import rigid_predict.utlis.geometry as geometry
 import rigid_predict.utlis.protein as protein
@@ -237,7 +237,7 @@ def get_gt_init_frames(angles, bb_coord, aatype, rigid_mask):
     flat_rigids = flatten_frame[rigid_mask]
     init_rigid = init_rigid[rigid_mask]
 
-    return flat_rigids, local_r, gt_global_frame, init_rigid
+    return flat_rigids.to_tensor_4x4(), local_r.to_tensor_4x4(), gt_global_frame.to_tensor_4x4(), init_rigid.to_tensor_4x4()
 
 
 def update_E_idx(frames: geometry.Rigid,  # [*, N_rigid] Rigid
@@ -315,3 +315,25 @@ def batched_gather(data, inds, dim=0, no_batch_dims=0):
     remaining_dims[dim - no_batch_dims if dim >= 0 else dim] = inds
     ranges.extend(remaining_dims)  # [Tensor(N,1), Tensor(N,37), slice(None)]
     return data[ranges]  # [N, 37, 3]
+
+
+def make_atom14_positions(aatypes):
+
+    restype_atom14_mask = []
+
+    for rt in constant.restypes:
+
+        atom_names = constant.restype_name_to_atom14_names[
+            constant.restype_1to3[rt]]
+        
+        restype_atom14_mask.append(
+            [(1.0 if name else 0.0) for name in atom_names]
+        )
+
+    # Add dummy mapping for restype 'UNK'.
+    restype_atom14_mask.append([0.0] * 14)
+
+    restype_atom14_mask =torch.tensor(restype_atom14_mask, dtype=torch.long, device=aatypes.device)
+    residx_atom14_mask = restype_atom14_mask[aatypes]
+
+    return residx_atom14_mask

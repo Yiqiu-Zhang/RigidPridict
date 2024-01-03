@@ -1,0 +1,6 @@
+*.log
+bin/out*
+bin/Result_*
+*.pkl
+*.pyc
+

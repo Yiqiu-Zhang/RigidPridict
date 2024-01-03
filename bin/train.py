@@ -27,8 +27,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from torch_geometric.data import lightning
 
-sys.path.append(r"/mnt/petrelfs/zhangyiqiu/rigiddiff")
-from rigid_predict.model.model import RigidPacking
+sys.path.append(r"/mnt/petrelfs/zhangyiqiu/RigidPridict/")
+from rigid_predict.model.model import RigidPacking_Lighting
 
 from rigid_predict.data import dataset
 
@@ -125,10 +125,10 @@ def train(
                                             batch_size=effective_batch_size,
                                             pin_memory=True,
                                             num_workers=num_workers,
-                                            persistent_workers = True,
-                                            follow_batch=['x'])
+                                            #persistent_workers = True,
+                                            follow_batch=['x', 'gt_14pos'])
 
-    model = RigidPacking(
+    model = RigidPacking_Lighting(
         lr=lr,
       # diffusion_fraction = 0.7,
         l2=l2_norm,
@@ -136,7 +136,6 @@ def train(
         epochs=max_epochs,
         steps_per_epoch=len(datamodule.train_dataloader()),
         lr_scheduler=lr_scheduler,
-        write_preds_to_dir=results_folder / "valid_preds" if write_valid_preds else None,
     )
 
     callbacks = build_callbacks(outdir=results_folder)
@@ -221,6 +220,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def update_dict_nonnull(d: Dict[str, Any], vals: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Update a dictionary with values from another dictionary.
+    >>> update_dict_nonnull({'a': 1, 'b': 2}, {'b': 3, 'c': 4})
+    {'a': 1, 'b': 3, 'c': 4}
+    """
+    for k, v in vals.items():
+        if k in d:
+            if d[k] != v and v is not None:
+                logging.info(f"Replacing key {k} original value {d[k]} with {v}")
+                d[k] = v
+        else:
+            d[k] = v
+    return d
+
 def main():
     """Run the training script based on params in the given json file"""
     parser = build_parser()
@@ -231,7 +245,7 @@ def main():
     if args.config:
         with open(args.config) as source:
             config_args = json.load(source)
-    config_args = diffussion_utils.update_dict_nonnull(
+    config_args = update_dict_nonnull(
         config_args,
         {
             "results_dir": args.outdir,

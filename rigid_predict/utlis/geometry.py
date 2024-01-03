@@ -619,7 +619,7 @@ class Rigid:
                 The inverse transformation.
         """
         rot_inv = self.rot.invert()
-        trn_inv = rot_vec(rot_inv, self.trans)
+        trn_inv = rot_vec(rot_inv.get_rot_mat(), self.trans)
 
         return Rigid(rot_inv, -1 * trn_inv)
 

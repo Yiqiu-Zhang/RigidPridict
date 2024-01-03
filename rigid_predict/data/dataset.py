@@ -4,10 +4,10 @@ from abc import ABC
 import torch
 import torch.nn as nn
 import torch_geometric
-from rigid_predict.utlis.structure_build import get_gt_init_frames
+from rigid_predict.utlis.structure_build import get_gt_init_frames, make_atom14_positions, frame_to_14pos
 from rigid_predict.utlis.constant import restype_frame_mask, middle_atom_mask
 from torch_geometric.data import Dataset
-
+from rigid_predict.utlis.geometry import from_tensor_4x4
 
 def relpos(rigid_res_index, edge_index):
     d_i = rigid_res_index[edge_index[0]]
@@ -54,6 +54,7 @@ def knn_graph(x, k):
 
 def update_edges(rigids, seq, rigid_mask, k=60, ):
     res_index = torch.arange(0, len(seq))
+    rigids = from_tensor_4x4(rigids)
     edge_index, distance = knn_graph(rigids.trans, k)
 
     distance_rbf = rbf(distance)
@@ -99,8 +100,18 @@ def protein_to_graph(protein):
 
     gt_rigids, _, gt_global_frame, init_rigid = get_gt_init_frames(angles, coords, seq, rigid_mask)
 
+    gt_14pos = frame_to_14pos(
+            gt_global_frame[...,4:,:,:],
+            gt_global_frame[...,:4,:,:],
+            seq,
+            coords
+        )
+
     k = 32 if len(node_feature) >= 32 else len(node_feature)
     distance_rbf, relative_pos, edge_index = update_edges(init_rigid, seq, rigid_mask, k)
+
+    # 暂时用这个function去算 atom 14 mask 之后再改
+    atom14_atom_exists = make_atom14_positions(seq)
 
     data = torch_geometric.data.Data(x=node_feature,
                                      esm_s=esm_s,
@@ -114,9 +125,11 @@ def protein_to_graph(protein):
                                      edge_attr=relative_pos,
                                      atom_mask=mid_frame_mask,
                                      bb_mask=bb_mask,
-                                     gt_rigids=gt_rigids.to_tensor_4x4(),
-                                     rigid=init_rigid.to_tensor_4x4(),
-                                     gt_global_frame=gt_global_frame.to_tensor_4x4(),
+                                     gt_rigids=gt_rigids,
+                                     rigid=init_rigid,
+                                     gt_global_frame=gt_global_frame,
+                                     gt_14pos = gt_14pos,
+                                     atom14_atom_exists=atom14_atom_exists,
                                      )
 
     return data
@@ -134,7 +147,8 @@ def preprocess_datapoints(graph_data=None, raw_dir=None):
 
         proteins = []
         for protein in proteins_list:
-            proteins.append(protein_to_graph(protein))
+            if len(protein['seq']) < 2000:
+                proteins.append(protein_to_graph(protein))
 
         if graph_data:
             print("Store_data at", graph_data)
