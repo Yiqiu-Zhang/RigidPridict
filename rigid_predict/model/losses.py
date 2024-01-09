@@ -16,7 +16,7 @@ def fape_loss(
     for batch in range(data.batch_size):
 
         mask = data.x_batch == batch
-        gt_rigid_batch = data.gt_rigids[mask]
+        gt_rigid_batch = data.gt_rigids.view(-1, 4, 4)[data.rigid_mask][mask]
         pred_frames_batch = out['frames'][:, mask]
         atom_rigid_mask_batch = data.atom_mask[mask]
         res_mask = data.gt_14pos_batch == batch

@@ -5,7 +5,7 @@ import glob
 from pathlib import Path
 import json
 import logging
-import time 
+import time
 
 import torch
 import torch.nn as nn
@@ -13,6 +13,7 @@ import numpy as np
 from rigid_predict.utlis import geometry, structure_build
 from rigid_predict.utlis.tensor_utlis import dict_multimap
 from rigid_predict.model.attention import GraphIPA
+
 
 class LayerNorm(nn.Module):
     def __init__(self, c_in, eps=1e-5):
@@ -25,7 +26,6 @@ class LayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(c_in))
 
     def forward(self, x):
-
         out = nn.functional.layer_norm(
             x,
             self.c_in,
@@ -36,8 +36,10 @@ class LayerNorm(nn.Module):
 
         return out
 
+
 class TransitionLayer(nn.Module):
     """ We only get one transitionlayer in our model, so no module needed."""
+
     def __init__(self, c):
         super(TransitionLayer, self).__init__()
 
@@ -66,6 +68,7 @@ class TransitionLayer(nn.Module):
 
         return s
 
+
 class EdgeTransition(nn.Module):
     def __init__(
             self,
@@ -74,7 +77,7 @@ class EdgeTransition(nn.Module):
             edge_embed_out,
             num_layers=2,
             node_dilation=2
-        ):
+    ):
         super(EdgeTransition, self).__init__()
 
         bias_embed_size = node_embed_size // node_dilation
@@ -89,12 +92,11 @@ class EdgeTransition(nn.Module):
         self.layer_norm = nn.LayerNorm(edge_embed_out)
 
     def forward(self, data, node_emb, edge_emb):
-
         # [N_rigid, c_n/2]
         node_emb = self.initial_embed(node_emb)
 
         # [E, c_n]
-        edge_bias = torch.cat([node_emb[data.edge_index[0]], node_emb[data.edge_index[1]],], axis=-1)
+        edge_bias = torch.cat([node_emb[data.edge_index[0]], node_emb[data.edge_index[1]], ], axis=-1)
 
         # [E, c_n + c_z]
         edge_emb = torch.cat([edge_emb, edge_bias], axis=-1)
@@ -105,6 +107,7 @@ class EdgeTransition(nn.Module):
         edge_emb = self.layer_norm(edge_emb)
 
         return edge_emb
+
 
 class RigidUpdate(nn.Module):
     """
@@ -124,18 +127,18 @@ class RigidUpdate(nn.Module):
     def forward(self,
                 s: torch.Tensor,
                 bb_mask: torch.Tensor,
-                atom_mask: torch.Tensor,) -> Tuple[torch.Tensor, torch.Tensor]:
-
+                atom_mask: torch.Tensor, ) -> Tuple[torch.Tensor, torch.Tensor]:
         # [N, 6]
         update = self.linear(s)
         am = torch.ones(len(atom_mask), 6).to(s.device)
         bm = torch.ones(len(bb_mask), 6).to(s.device)
-        am[atom_mask] = torch.tensor([0., 0, 0., 1., 1., 1.]).to(s.device) # only mask rotation
-        bm[bb_mask] = torch.tensor([0., 0., 0., 0., 0., 0.]).to(s.device) # mask both rotation and translation
+        am[atom_mask] = torch.tensor([0., 0, 0., 1., 1., 1.]).to(s.device)  # only mask rotation
+        bm[bb_mask] = torch.tensor([0., 0., 0., 0., 0., 0.]).to(s.device)  # mask both rotation and translation
 
         update = update * am * bm
 
         return update
+
 
 class PairEmbedder(nn.Module):
     """
@@ -186,6 +189,7 @@ class PairEmbedder(nn.Module):
 
         return pair_emb
 
+
 class InputEmbedder(nn.Module):
     def __init__(
             self,
@@ -205,7 +209,7 @@ class InputEmbedder(nn.Module):
         self.relpos_embedding = torch.nn.Embedding(pair_dim, c_z)
 
         self.pair_embedder = PairEmbedder(c_z,
-                                          c_z,)
+                                          c_z, )
 
         self.linear_tf_0 = nn.Linear(nf_dim, c_s)
         self.linear_tf_1 = nn.Linear(c_s, c_s)
@@ -217,8 +221,7 @@ class InputEmbedder(nn.Module):
         self.o_proj = nn.Linear(2 * c_z, c_z, bias=True)
 
     def forward(self, data):
-
-        ems_s = data.esm_s.repeat(1, 5).reshape(-1, data.esm_s.shape[-1])
+        ems_s = data.esm_s.repeat(1, 3).reshape(-1, data.esm_s.shape[-1])
         ems_s = ems_s[data.rigid_mask]
 
         s = ems_s + self.linear_tf_0(data.x)
@@ -243,6 +246,7 @@ class InputEmbedder(nn.Module):
         z = z + self.pair_embedder(z)
 
         return s, z
+
 
 class StructureUpdateModule(nn.Module):
 
@@ -273,8 +277,6 @@ class StructureUpdateModule(nn.Module):
 
             self.blocks.append(block)
 
-
-
     def forward(self, data, s, z):
 
         outputs = []
@@ -285,9 +287,9 @@ class StructureUpdateModule(nn.Module):
 
             preds = {
                 "frames": r.to_tensor_4x4(),
-                #"sidechain_frames": all_frames_to_global.to_tensor_4x4(),
+                # "sidechain_frames": all_frames_to_global.to_tensor_4x4(),
                 "positions": pred_xyz,
-                #"states": s,
+                # "states": s,
             }
 
             outputs.append(preds)
@@ -299,6 +301,7 @@ class StructureUpdateModule(nn.Module):
         outputs = dict_multimap(torch.stack, outputs)
 
         return outputs
+
 
 class StructureBlock(nn.Module):
     def __init__(self,
@@ -312,7 +315,7 @@ class StructureBlock(nn.Module):
                  no_blocks,
                  ):
         super(StructureBlock, self).__init__()
-        
+
         self.no_blocks = no_blocks
         self.edge_ipa = GraphIPA(c_s,
                                  c_hidden,
@@ -320,7 +323,7 @@ class StructureBlock(nn.Module):
                                  ipa_no_heads,
                                  no_qk_points,
                                  no_v_points,
-        )
+                                 )
         self.ipa_ln = LayerNorm(c_s)
 
         '''
@@ -333,10 +336,10 @@ class StructureBlock(nn.Module):
 
         self.node_transition = TransitionLayer(c_s)
 
-        if block_idx < (no_blocks-1):
+        if block_idx < (no_blocks - 1):
             self.edge_transition = EdgeTransition(c_s,
-                                                c_z,
-                                                c_z)
+                                                  c_z,
+                                                  c_z)
 
         self.Rigid_update = RigidUpdate(c_s)
 
@@ -346,7 +349,7 @@ class StructureBlock(nn.Module):
         s = s + self.edge_ipa(data, s, z)
         s = self.ipa_ln(s)
         s = self.node_transition(s)
-        if i < (self.no_blocks -1):
+        if i < (self.no_blocks - 1):
             z = self.edge_transition(data, s, z)
 
         r = r.compose_q_update_vec(self.Rigid_update(s, data.bb_mask, data.atom_mask))
@@ -360,7 +363,7 @@ class StructureBlock(nn.Module):
             r.trans,
         )
 
-        identity = geometry.Rigid.identity((len(data.aatype),5), device= r.device)
+        identity = geometry.Rigid.identity((len(data.aatype), 3), device=r.device)
         flatten_identity = geometry.flatten_rigid(identity)
         t_identity = flatten_identity.to_tensor_4x4()
         t_identity[data.rigid_mask] = r.to_tensor_4x4()
@@ -369,12 +372,13 @@ class StructureBlock(nn.Module):
 
         pred_xyz = structure_build.frame_to_14pos(
             sidechain_frame_tensor,
-            data.gt_global_frame[...,:4,:,:],
+            data.gt_rigids[..., :1, :, :],
             data.aatype,
-            data.bb_coord
+            data.bb_coord,
         )
 
         return s, z, pred_xyz, r
+
 
 class RigidPacking(nn.Module):
     """
@@ -382,36 +386,36 @@ class RigidPacking(nn.Module):
     """
 
     def __init__(self,
-                 num_blocks: int = 6, # StructureUpdateModule的循环次数
+                 num_blocks: int = 6,  # StructureUpdateModule的循环次数
 
                  # InputEmbedder config
-                 nf_dim: int = 7 + 19,
-                 c_s: int = 320, # Node channel dimension after InputEmbedding
+                 nf_dim: int = 20,
+                 c_s: int = 320,  # Node channel dimension after InputEmbedding
 
                  # PairEmbedder parameter
-                 pair_dim: int = 2*32+1 , # rbf+3+4 + nf_dim* 2 + 2* relpos_k+1 + 10 edge type
-                 c_z: int = 64, # Pair channel dimension after InputEmbedding
-                 #c_hidden_tri_att: int = 16, # x2 cause we x2 the input dimension
-                 #c_hidden_tri_mul: int = 32, # Keep ori
-                 #pairemb_no_blocks: int = 2, # Keep ori
-                 #mha_no_heads: int = 4, # Keep ori
-                 #pair_transition_n: int = 2, # Keep ori
+                 pair_dim: int = 2 * 32 + 1,  # rbf+3+4 + nf_dim* 2 + 2* relpos_k+1 + 10 edge type
+                 c_z: int = 64,  # Pair channel dimension after InputEmbedding
+                 # c_hidden_tri_att: int = 16, # x2 cause we x2 the input dimension
+                 # c_hidden_tri_mul: int = 32, # Keep ori
+                 # pairemb_no_blocks: int = 2, # Keep ori
+                 # mha_no_heads: int = 4, # Keep ori
+                 # pair_transition_n: int = 2, # Keep ori
 
                  # IPA config
                  c_hidden: int = 12,  # IPA hidden channel dimension
                  ipa_no_heads: int = 8,  # Number of attention head
-                 no_qk_points: int =4,  # Number of qurry/key (3D vector) point head
-                 no_v_points: int =8,  # Number of value (3D vector) point head
+                 no_qk_points: int = 4,  # Number of qurry/key (3D vector) point head
+                 no_v_points: int = 8,  # Number of value (3D vector) point head
 
                  # AngleResnet
-                 c_resnet: int = 128, # AngleResnet hidden channel dimension
-                 no_resnet_blocks: int = 4, # Resnet block number
-                 no_angles: int = 4, # predict chi 1-4 4 angles
+                 c_resnet: int = 128,  # AngleResnet hidden channel dimension
+                 no_resnet_blocks: int = 4,  # Resnet block number
+                 no_angles: int = 4,  # predict chi 1-4 4 angles
                  epsilon: int = 1e-7,
-                 top_k: int =64,
+                 top_k: int = 64,
 
                  # Arc config
-                 all_loc = False,
+                 all_loc=False,
                  ):
 
         super(RigidPacking, self).__init__()
@@ -419,27 +423,27 @@ class RigidPacking(nn.Module):
         self.all_loc = all_loc
         self.num_blocks = num_blocks
         self.top_k = top_k
-        
+
         self.train_epoch_counter = 0
         self.train_epoch_last_time = time.time()
 
         self.input_embedder = InputEmbedder(nf_dim, c_s,
-                                            pair_dim, c_z, # Pair feature related dim
-                                            #c_hidden_tri_att, c_hidden_tri_mul, # hidden dim for TriangleAttention, TriangleMultiplication
-                                            #pairemb_no_blocks, mha_no_heads, pair_transition_n,
+                                            pair_dim, c_z,  # Pair feature related dim
+                                            # c_hidden_tri_att, c_hidden_tri_mul, # hidden dim for TriangleAttention, TriangleMultiplication
+                                            # pairemb_no_blocks, mha_no_heads, pair_transition_n,
                                             )
 
         self.structure_update = StructureUpdateModule(num_blocks,
-                                                     c_s,
-                                                     c_z,
-                                                     c_hidden,
-                                                     ipa_no_heads,
-                                                     no_qk_points,
-                                                     no_v_points)
+                                                      c_s,
+                                                      c_z,
+                                                      c_hidden,
+                                                      ipa_no_heads,
+                                                      no_qk_points,
+                                                      no_v_points)
 
     def forward(self,
                 data):
-        
+
         torch.cuda.empty_cache()
         # [N_rigid, (c_s,c_v)], [E, (e_s,e_v)]
         s, z = self.input_embedder(data)
@@ -451,12 +455,12 @@ class RigidPacking(nn.Module):
 
     @classmethod
     def from_dir(
-        cls,
-        dirname: str,
-        load_weights: bool = True,
-        best_by: Literal["train", "valid"] = "valid",
-        copy_to: str = "",
-        **kwargs,
+            cls,
+            dirname: str,
+            load_weights: bool = True,
+            best_by: Literal["train", "valid"] = "valid",
+            copy_to: str = "",
+            **kwargs,
     ):
         """
         Builds this model out from directory. Legacy mode is for loading models
@@ -471,7 +475,7 @@ class RigidPacking(nn.Module):
             subfolder = f"best_by_{best_by}"
             ckpt_names = glob.glob(os.path.join(dirname, "models", subfolder, "*.ckpt"))
             logging.info(f"Found {len(ckpt_names)} checkpoints")
-            ckpt_name = ckpt_names[1] # choose which check point
+            ckpt_name = ckpt_names[1]  # choose which check point
             logging.info(f"Loading weights from {ckpt_name}")
 
             retval = cls()
@@ -492,4 +496,3 @@ class RigidPacking(nn.Module):
                 shutil.copyfile(ckpt_name, ckpt_dir / os.path.basename(ckpt_name))
 
         return retval
-

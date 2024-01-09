@@ -1,14 +1,21 @@
-from rigid_predict.data import dataset
+import pickle
+
+import torch
 from torch_geometric.data import lightning
+from dataset import protein_to_graph
+import dataset
 from rigid_predict.model.model import RigidPacking
 from rigid_predict.model import losses
+with open('D:\ProteinProject\RigidPridict\Test_data.pkl', "rb") as file:
+    proteins_list = pickle.load(file)
+
 graph_data = dataset.preprocess_datapoints(raw_dir='D:\ProteinProject\RigidPridict\Test_data.pkl')
+
 
 dset = dataset.ProteinDataset(data=graph_data)
 
-split_idx = int(len(graph_data) * 0.1)
-train_set = dset[:split_idx]
-validation_set = dset[split_idx:]
+train_set = dset[:5]
+validation_set = dset
 
 datamodule = lightning.LightningDataset(train_dataset=train_set,
                                         val_dataset=validation_set,
@@ -17,10 +24,12 @@ datamodule = lightning.LightningDataset(train_dataset=train_set,
                                         # num_workers=num_workers,
                                         # persistent_workers=True,
                                         follow_batch=['x', 'gt_14pos'])
+
 model = RigidPacking()
+for b in datamodule.train_dataloader():
 
-for batch in datamodule.train_dataloader():
+    output = model.forward(b)
 
-    outputs = model.forward(batch)
+    avg_loss = losses.fape_loss(output, b)
 
-    avg_loss = losses.fape_loss(outputs, batch)
+

@@ -3,12 +3,14 @@ from abc import ABC
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch_geometric
 from rigid_predict.utlis.structure_build import get_gt_init_frames, make_atom14_positions, frame_to_14pos
-from rigid_predict.utlis.constant import restype_frame_mask, middle_atom_mask
 from torch_geometric.data import Dataset
 from rigid_predict.utlis.geometry import from_tensor_4x4
-
+import data_transform
+from rigid_predict.utlis import constant_test
+from rigid_predict.utlis import structure_build
 def relpos(rigid_res_index, edge_index):
     d_i = rigid_res_index[edge_index[0]]
     d_j = rigid_res_index[edge_index[1]]
@@ -52,13 +54,13 @@ def knn_graph(x, k):
     return torch.stack([row, col], dim=0), distance.flatten()
 
 
-def update_edges(rigids, seq, rigid_mask, k=60, ):
+def update_edges(rigids, seq, rigid_mask, k=30,):
     res_index = torch.arange(0, len(seq))
     rigids = from_tensor_4x4(rigids)
     edge_index, distance = knn_graph(rigids.trans, k)
 
     distance_rbf = rbf(distance)
-    rigid_res_idx = res_index.unsqueeze(-1).repeat(1, 5).reshape(-1)
+    rigid_res_idx = res_index.unsqueeze(-1).repeat(1, 3).reshape(-1)
     rigid_res_idx = rigid_res_idx[rigid_mask]
 
     relative_pos = relpos(rigid_res_idx, edge_index)
@@ -71,67 +73,72 @@ def protein_to_graph(protein):
     seq = torch.as_tensor(protein['seq'])
     coords = torch.as_tensor(protein['coords'])
     chi_mask = torch.as_tensor(protein['chi_mask'])
-    rigid_type_onehot = torch.as_tensor(protein['rigid_type_onehot'])
-    rigid_property = torch.as_tensor(protein['rigid_property'])
+    # rigid_type_onehot = torch.as_tensor(protein['rigid_type_onehot'])
+    # rigid_property = torch.as_tensor(protein['rigid_property'])
     esm_s = torch.as_tensor(protein['acid_embedding'])
     fname = protein['fname']
+    all_atom_positions = torch.as_tensor(protein["all_atom_positions"])
 
+    gt_frames_tensor = data_transform.atom37_to_frames(seq,
+                                                       all_atom_positions,
+                                                       )
     # rigid_mask
-    restype_frame5_mask = torch.tensor(restype_frame_mask, dtype=bool)
+    restype_frame5_mask = torch.tensor(constant_test.frame_mask, dtype=torch.bool)
     frame_mask = restype_frame5_mask[seq, ...]
     rigid_mask = torch.BoolTensor(torch.flatten(frame_mask, start_dim=-2))
 
-    mid_frame_mask = torch.tensor(middle_atom_mask, dtype=bool)
-    mid_frame_mask = mid_frame_mask[seq, ...]
-    mid_frame_mask = torch.BoolTensor(torch.flatten(mid_frame_mask, start_dim=-2))
-    mid_frame_mask = mid_frame_mask[rigid_mask]
+    atom_mask = torch.tensor(constant_test.middle_atom_mask, dtype=torch.bool)
+    atom_mask = atom_mask[seq, ...]
+    atom_mask = torch.BoolTensor(torch.flatten(atom_mask, start_dim=-2))
+    atom_mask = atom_mask[rigid_mask]
 
-    bb_mask = torch.zeros(*seq.shape, 5, dtype=bool)
+    bb_mask = torch.zeros(*seq.shape, 3, dtype=torch.bool)
     bb_mask[:, 0] = True
     bb_mask = torch.BoolTensor(torch.flatten(bb_mask, start_dim=-2))
     bb_mask = bb_mask[rigid_mask]
 
-    flat_rigid_type = rigid_type_onehot.reshape(-1, rigid_type_onehot.shape[-1])
-    flat_rigid_property = rigid_property.reshape(-1, rigid_property.shape[-1])
+    restype_rigid_type = torch.tensor(constant_test.restype_rigidtype, dtype=torch.long)
+    residx_rigid_type = restype_rigid_type[seq]
+    restype_rigid_mask = torch.tensor(constant_test.restype_rigid_mask, dtype=torch.bool)
+    residx_rigid_mask = restype_rigid_mask[seq]
+    residx_rigid_type_onehot = F.one_hot(residx_rigid_type, 20) * residx_rigid_mask.unsqueeze(-1)
+
+    flat_rigid_type = residx_rigid_type_onehot.reshape(-1, 20)
+    # flat_rigid_property = rigid_property.reshape(-1, rigid_property.shape[-1])
+
     # expand_seq = esm_s.repeat(1, 5).reshape(-1, esm_s.shape[-1])
     # [N_rigid, nf_dim] 7 + 19
-    node_feature = torch.cat((flat_rigid_type, flat_rigid_property), dim=-1).float()
-    node_feature = node_feature[rigid_mask]
+    node_feature = flat_rigid_type.float()[rigid_mask]
 
-    gt_rigids, _, gt_global_frame, init_rigid = get_gt_init_frames(angles, coords, seq, rigid_mask)
-
-    gt_14pos = frame_to_14pos(
-            gt_global_frame[...,4:,:,:],
-            gt_global_frame[...,:4,:,:],
-            seq,
-            coords
-        )
+    init_rigid = structure_build.get_init_frames(gt_frames_tensor, rigid_mask)
+    #  这个是根据我利用重构的frame算出来的，
+    #  要和从 pdb里面直接拿到的atom position做一个比较
+    gt_14pos_test = frame_to_14pos(gt_frames_tensor[..., 1:, :, :],
+                                   gt_frames_tensor[..., :1, :, :],
+                                   seq,
+                                   coords)
 
     k = 32 if len(node_feature) >= 32 else len(node_feature)
     distance_rbf, relative_pos, edge_index = update_edges(init_rigid, seq, rigid_mask, k)
 
     # 暂时用这个function去算 atom 14 mask 之后再改
-    atom14_atom_exists = make_atom14_positions(seq)
+    atom14_atom_exists, gt_14pos = make_atom14_positions(seq, all_atom_positions)
 
     data = torch_geometric.data.Data(x=node_feature,
                                      esm_s=esm_s,
-                                     true_chi=angles,
                                      aatype=seq,
                                      bb_coord=coords,
-                                     chi_mask=chi_mask,
                                      rigid_mask=rigid_mask,
                                      fname=fname,
                                      edge_index=edge_index,
                                      edge_attr=relative_pos,
-                                     atom_mask=mid_frame_mask,
+                                     atom_mask=atom_mask,
                                      bb_mask=bb_mask,
-                                     gt_rigids=gt_rigids,
+                                     gt_rigids=gt_frames_tensor,
                                      rigid=init_rigid,
-                                     gt_global_frame=gt_global_frame,
-                                     gt_14pos = gt_14pos,
+                                     gt_14pos=gt_14pos,
                                      atom14_atom_exists=atom14_atom_exists,
                                      )
-
     return data
 
 

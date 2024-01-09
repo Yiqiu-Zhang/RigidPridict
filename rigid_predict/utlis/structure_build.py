@@ -2,13 +2,14 @@ import torch
 import torch.nn as nn
 import numpy as np
 from rigid_predict.utlis.constant import (restype_rigid_group_default_frame,
-                                      restype_atom14_to_rigid_group,
-                                      restype_atom14_mask,
-                                      restype_atom14_rigid_group_positions,
-                                      restype_atom37_mask,
-                                      make_atom14_37_list,
-                                      )
+                                          restype_atom14_to_rigid_group,
+                                          restype_atom14_mask,
+                                          restype_atom14_rigid_group_positions,
+                                          restype_atom37_mask,
+                                          make_atom14_37_list,
+                                          )
 from rigid_predict.utlis import constant as constant
+from rigid_predict.utlis import constant_test
 import rigid_predict.utlis.constant as rc
 import rigid_predict.utlis.geometry as geometry
 import rigid_predict.utlis.protein as protein
@@ -72,44 +73,39 @@ def rotate_sidechain(
     return all_frames_to_bb, all_frames
 
 
-def frame_to_14pos(frames, gt_frame, aatype_idx, bb_cords):
-
-    frames = torch.cat([gt_frame, frames], dim=-3)
+def frame_to_14pos(frames: torch.Tensor,
+                   gt_bb_frames: torch.Tensor,
+                   aatype,
+                   bb_coord, ):
+    # [N , X_frame]
+    frames = torch.cat([gt_bb_frames, frames], dim=-3)
     frames = geometry.from_tensor_4x4(frames)
     # [21 , 14]
-    group_index = torch.tensor(restype_atom14_to_rigid_group).to(frames.device).to(torch.int64)
+    group_index = torch.tensor(constant_test.restype_atom14_to_rigid_group).to(frames.device).to(torch.int64)
 
-    # [21 , 14] idx [*, N] -> [*, N, 14]
-    group_mask = group_index[aatype_idx, ...]
-    # [*, N, 14, 8]
+    # [N , 14]
+    group_mask = group_index[aatype]
+    # # [N , 14, N_frame]
     group_mask = nn.functional.one_hot(group_mask, num_classes=frames.shape[-1])
-
-    # [*, N, 14, 8] Rigid frames for every 14 atoms, non exist atom are mapped to group 0
-    map_atoms_to_global = frames[..., None, :] * group_mask  # [*, N, :, 8] * [*, N, 14, 8]
-
-    # [*, N, 14]
+    # [N , 14, N_frame]
+    map_atoms_to_global = frames[..., None, :] * group_mask
+    # [N , 14]
     map_atoms_to_global = geometry.map_rigid_fn(map_atoms_to_global)
-
-    # [21 , 14]
-    atom_mask = torch.tensor(restype_atom14_mask).to(frames.device)
-    # [*, N, 14, 1]
-    atom_mask = atom_mask[aatype_idx, ...].unsqueeze(-1)
-
-    # [21, 14, 3] # 这个是以sidechain frame 为标准设立的pos， 按我的逻辑来肯定不能从这里开始移动
-    default_pos = torch.tensor(restype_atom14_rigid_group_positions).to(frames.device)
-    # [*, N, 14, 3]
-    default_pos = default_pos[aatype_idx, ...]
+    # [N, 14, 1]
+    atom_mask = torch.tensor(constant_test.restype_atom14_mask).to(frames.device)
+    atom_mask = atom_mask[aatype].unsqueeze(-1)
+    # [N, 14, 3]
+    default_pos = torch.tensor(constant_test.restype_atom14_rigid_group_positions).to(frames.device)
+    default_pos = default_pos[aatype]
 
     pred_pos = geometry.rigid_mul_vec(map_atoms_to_global, default_pos)
     pred_pos = pred_pos * atom_mask
 
-    #pred_pos, _ = atom14_to_atom37_batched(pred_pos, aatype_idx)
-
-    # this is just for convinient use of the backbone coordinate
-    # [B, N, 37, 3] [B,N,4,3]
-    pred_pos[..., :4, :] = bb_cords[..., :4, :]
+    pred_pos[..., :4, :] = bb_coord[..., :4, :]
 
     return pred_pos
+
+
 
 def batched_gather(data, inds, dim=0, no_batch_dims=0):
     ranges = []
@@ -124,6 +120,7 @@ def batched_gather(data, inds, dim=0, no_batch_dims=0):
     remaining_dims[dim - no_batch_dims if dim >= 0 else dim] = inds
     ranges.extend(remaining_dims)  # [Tensor(N,1), Tensor(N,37), slice(None)]
     return data[ranges]  # [N, 37, 3]
+
 
 def atom14_to_atom37_batched(atom14, aa_idx):  # atom14: [*, N, 14, 3]
 
@@ -145,6 +142,7 @@ def atom14_to_atom37_batched(atom14, aa_idx):  # atom14: [*, N, 14, 3]
 
     return atom37, atom37_mask
 
+
 def batch_gather(data,  # [N, 14, 3]
                  indexing):  # [N,37]
     ranges = []
@@ -164,6 +162,7 @@ def batch_gather(data,  # [N, 14, 3]
     # print("ranges========",ranges.shape)
     return data[ranges]  # [N, 37, 3]
 
+
 def atom14_to_atom37(atom14, aa_idx):  # atom14: [*, N, 14, 3]
 
     restype_atom37_to_atom14 = make_atom14_37_list()  # 注意有错
@@ -181,6 +180,7 @@ def atom14_to_atom37(atom14, aa_idx):  # atom14: [*, N, 14, 3]
     atom37 = atom37 * atom37_mask[..., None]
 
     return atom37
+
 
 def get_default_r(restype_idx):
     default_frame = torch.tensor(restype_rigid_group_default_frame)
@@ -220,15 +220,15 @@ def torsion_to_frame(angles,
 
     return flat_rigids, local_r, all_frames_to_global
 
-def get_gt_init_frames(angles, bb_coord, aatype, rigid_mask):
 
+def get_gt_init_frames(angles, bb_coord, aatype, rigid_mask):
     init_local_rigid = get_default_r(aatype)
 
     bb_to_gb = geometry.get_gb_trans(bb_coord)
-    sc_to_bb, local_r = rotate_sidechain(aatype, angles, init_local_rigid)
+    sc_to_bb, _ = rotate_sidechain(aatype, angles, init_local_rigid)
     gt_global_frame = geometry.Rigid_mult(bb_to_gb[..., None], sc_to_bb)
 
-    init_frame  = geometry.Rigid_mult(bb_to_gb[..., None], geometry.Rigid.identity(sc_to_bb.shape, requires_grad=False))
+    init_frame = geometry.Rigid_mult(bb_to_gb[..., None], geometry.Rigid.identity(sc_to_bb.shape, requires_grad=False))
 
     # [N_rigid] Rigid
     flatten_frame = geometry.flatten_rigid(gt_global_frame[..., [0, 4, 5, 6, 7]])
@@ -237,7 +237,18 @@ def get_gt_init_frames(angles, bb_coord, aatype, rigid_mask):
     flat_rigids = flatten_frame[rigid_mask]
     init_rigid = init_rigid[rigid_mask]
 
-    return flat_rigids.to_tensor_4x4(), local_r.to_tensor_4x4(), gt_global_frame.to_tensor_4x4(), init_rigid.to_tensor_4x4()
+    return flat_rigids.to_tensor_4x4(), _, gt_global_frame.to_tensor_4x4(), init_rigid.to_tensor_4x4()
+
+
+def get_init_frames(gt_frames_tensor, rigid_mask):
+    init_rigid_position = gt_frames_tensor[..., :1, :, :]
+
+    init_frame_tensor = init_rigid_position.tile(1, 3, 1, 1)
+    flat_frame_tenor = init_frame_tensor.view(-1, 4, 4)
+
+    init_rigids = flat_frame_tenor[rigid_mask, ...]
+
+    return init_rigids
 
 
 def update_E_idx(frames: geometry.Rigid,  # [*, N_rigid] Rigid
@@ -302,38 +313,57 @@ def get_chi_atom_indices():
 
     return chi_atom_indices
 
-def batched_gather(data, inds, dim=0, no_batch_dims=0):
-    ranges = []
-    for i, s in enumerate(data.shape[:no_batch_dims]):
-        r = torch.arange(s)  # torch.arange N
-        r = r.view(*(*((1,) * i), -1, *((1,) * (len(inds.shape) - i - 1))))  # [N, 1]
-        ranges.append(r)
 
-    remaining_dims = [
-        slice(None) for _ in range(len(data.shape) - no_batch_dims)
-    ]
-    remaining_dims[dim - no_batch_dims if dim >= 0 else dim] = inds
-    ranges.extend(remaining_dims)  # [Tensor(N,1), Tensor(N,37), slice(None)]
-    return data[ranges]  # [N, 37, 3]
-
-
-def make_atom14_positions(aatypes):
-
+def make_atom14_positions(aatypes, all_atom_positions):
+    restype_atom14_to_atom37 = []
+    restype_atom37_to_atom14 = []
     restype_atom14_mask = []
 
     for rt in constant.restypes:
-
         atom_names = constant.restype_name_to_atom14_names[
             constant.restype_1to3[rt]]
-        
+        restype_atom14_to_atom37.append(
+            [(constant.atom_order[name] if name else 0) for name in atom_names]
+        )
+
+        atom_name_to_idx14 = {name: i for i, name in enumerate(atom_names)}
+        restype_atom37_to_atom14.append(
+            [(atom_name_to_idx14[name] if name in atom_name_to_idx14 else 0)
+             for name in constant.atom_types]
+        )
+
         restype_atom14_mask.append(
             [(1.0 if name else 0.0) for name in atom_names]
         )
 
     # Add dummy mapping for restype 'UNK'.
     restype_atom14_mask.append([0.0] * 14)
+    restype_atom14_to_atom37.append([0.0] * 14)
+    restype_atom37_to_atom14.append([0.0] * 37)
 
-    restype_atom14_mask =torch.tensor(restype_atom14_mask, dtype=torch.long, device=aatypes.device)
+    restype_atom14_to_atom37 = torch.tensor(
+        restype_atom14_to_atom37,
+        dtype=torch.long,
+        device=aatypes.device
+    )
+    restype_atom37_to_atom14 = torch.tensor(
+        restype_atom37_to_atom14,
+        dtype=torch.long,
+        device=aatypes.device
+    )
+
+    restype_atom14_mask = torch.tensor(restype_atom14_mask, dtype=torch.long, device=aatypes.device)
+    # [N_res, 14/37]
+    residx_atom14_to_atom37 = restype_atom14_to_atom37[aatypes]
+    residx_atom37_to_atom14 = restype_atom37_to_atom14[aatypes]
     residx_atom14_mask = restype_atom14_mask[aatypes]
+    # [N_res, 37] gather by [N_res, 14] => [N_Res,14]
 
-    return residx_atom14_mask
+    # [N_res, 37, 3] gather by [N_res, 14] => [N_Res, 14, 3]
+    residx_atom14_gt_positions = residx_atom14_mask[..., None] * (batched_gather(
+        all_atom_positions,
+        residx_atom14_to_atom37,  # Why this? not atom37_to_atom14
+        dim=-2,
+        no_batch_dims=len(all_atom_positions.shape[:-2])))
+
+    return residx_atom14_mask, residx_atom14_gt_positions
