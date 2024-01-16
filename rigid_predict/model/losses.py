@@ -9,8 +9,8 @@ from rigid_predict.utlis.geometry import Rigid
 def fape_loss(
         out: Dict[str, torch.Tensor],
         data,
-        backbone_weight=0.5,
-        sidechain_weight=0.5,
+        rigid_weight=0.5,
+        all_atom_weight=0.5,
 ):
     loss = 0
     for batch in range(data.batch_size):
@@ -23,13 +23,13 @@ def fape_loss(
         gt_pos_batch = data.gt_14pos[res_mask]
         atom14_mask_batch = data.atom14_atom_exists[res_mask]
         pred_pos_batch = out["positions"][:, res_mask]
-        bb_loss = backbone_loss(
+        rigid_loss = frame_loss(
             gt_rigid_batch,
             atom_rigid_mask_batch,
             traj=pred_frames_batch,
         )
         
-        sc_loss = sidechain_loss(
+        all_atom = all_atom_loss(
             pred_frames_batch[-1], # Only the last frame predicted 
             pred_pos_batch[-1],
             gt_rigid_batch,
@@ -39,14 +39,14 @@ def fape_loss(
         )
         
 
-        loss = loss + backbone_weight * bb_loss  + sidechain_weight * sc_loss
+        loss = loss + rigid_weight * rigid_loss  + all_atom_weight * all_atom
 
     # Average over the batch dimension
     loss = loss / data.batch_size
 
     return loss
 
-def backbone_loss(
+def frame_loss(
         gt_rigid_tensor: torch.Tensor,
         atom_rigid_mask: torch.Tensor,
         traj: geometry.Rigid,
@@ -97,7 +97,7 @@ def backbone_loss(
 
     return fape_loss
 
-def sidechain_loss(
+def all_atom_loss(
     sidechain_frames: torch.Tensor, # [N_rigid, 4, 4]
     sidechain_atom_pos: torch.Tensor,
     rigidgroups_gt_frames: torch.Tensor,

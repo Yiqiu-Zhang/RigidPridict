@@ -241,9 +241,10 @@ def get_gt_init_frames(angles, bb_coord, aatype, rigid_mask):
 
 
 def get_init_frames(gt_frames_tensor, rigid_mask):
-    init_rigid_position = gt_frames_tensor[..., :1, :, :]
+    init_bb_frame = gt_frames_tensor[..., :1, :, :]
 
-    init_frame_tensor = init_rigid_position.tile(1, 3, 1, 1)
+    init_frame_tensor = init_bb_frame.tile(1, 3, 1, 1)
+    init_frame_tensor[..., 1:, :3, :3] = init_frame_tensor.new_tensor(torch.eye(3))
     flat_frame_tenor = init_frame_tensor.view(-1, 4, 4)
 
     init_rigids = flat_frame_tenor[rigid_mask, ...]

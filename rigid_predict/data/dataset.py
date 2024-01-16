@@ -8,7 +8,7 @@ import torch_geometric
 from rigid_predict.utlis.structure_build import get_gt_init_frames, make_atom14_positions, frame_to_14pos
 from torch_geometric.data import Dataset
 from rigid_predict.utlis.geometry import from_tensor_4x4
-import data_transform
+from rigid_predict.data import data_transform
 from rigid_predict.utlis import constant_test
 from rigid_predict.utlis import structure_build
 def relpos(rigid_res_index, edge_index):

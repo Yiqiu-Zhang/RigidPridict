@@ -125,7 +125,7 @@ def train(
                                             batch_size=effective_batch_size,
                                             pin_memory=True,
                                             num_workers=num_workers,
-                                            #persistent_workers = True,
+                                            persistent_workers = True,
                                             follow_batch=['x', 'gt_14pos'])
 
     model = RigidPacking_Lighting(
@@ -152,7 +152,7 @@ def train(
         check_val_every_n_epoch=1,
         callbacks=callbacks,
         logger=pl.loggers.CSVLogger(save_dir=results_folder / "logs"),
-        log_every_n_steps=min(1,len(datamodule.train_dataloader())),  # Log >= once per epoch
+        log_every_n_steps=min(50,len(datamodule.train_dataloader())),  # Log >= once per epoch
         accelerator='gpu',
         strategy=strategy,
         devices=ndevice,
@@ -167,7 +167,7 @@ def train(
     trainer.fit(
         model=model,
         datamodule=datamodule,
-        #ckpt_path = '/mnt/petrelfs/zhangyiqiu/rigiddiff/bin/result_122_crossIPA copy/models/best_by_valid/sample-mnist-epoch=226-mean_loss=0.541.ckpt'
+        ckpt_path = '/mnt/petrelfs/zhangyiqiu/RigidPridict/bin/last.ckpt'
     )
 
 def build_parser() -> argparse.ArgumentParser:

@@ -104,7 +104,7 @@ class RigidPacking_Lighting(RigidPacking, pl.LightningModule):
             elif self.lr_scheduler == "LinearWarmup":
                 # https://huggingface.co/docs/transformers/v4.21.2/en/main_classes/optimizer_schedules#transformers.get_linear_schedule_with_warmup
                 # Transformers typically do well with linear warmup
-                warmup_steps = int(self.epochs * 0.2)
+                warmup_steps = int(self.epochs * 0.1)
                 pl.utilities.rank_zero_info(
                     f"Using linear warmup with {warmup_steps}/{self.epochs} warmup steps"
                 )

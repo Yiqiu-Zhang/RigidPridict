@@ -3,7 +3,7 @@
 #SBATCH -p bio_s1
 
 ### This needs to match Trainer(num_nodes=...)
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 
 ###单个节点使用的GPU个数，如果不需要GPU，则忽略该项
 #SBATCH --gres=gpu:2
@@ -23,4 +23,4 @@ export NCCL_IB_HCA=mlx5_0
 export NCCL_SOCKET_IFNAME=eth0
 export CUDA_LAUNCH_BLOCKING=1
 
-srun --kill-on-bad-exit=1 python3 train.py /mnt/petrelfs/zhangyiqiu/RigidPridict/bin/train.json --ndevice 2 --node 1 -o Result_RigidPredict
+srun --kill-on-bad-exit=1 python3 train.py /mnt/petrelfs/zhangyiqiu/RigidPridict/bin/train.json --ndevice 2 --node 2 -o Result_RigidPredict
